@@ -19,8 +19,11 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-LOG_FILE = Path.home() / "claude_usage_log.json"
-DEBUG_FILE = Path.home() / "claude_usage_debug.txt"
+# All widget data is self-contained under ~/.claude-widget; nothing is written
+# elsewhere in $HOME so the widget never touches external folders.
+DATA_DIR = Path.home() / ".claude-widget"
+LOG_FILE = DATA_DIR / "usage_log.json"
+DEBUG_FILE = DATA_DIR / "usage_debug.txt"
 
 KEYS = ["Current session", "Weekly All models", "Weekly Sonnet only", "Weekly Claude Design"]
 
@@ -142,6 +145,29 @@ def _parse_percent(text: str, pattern: str) -> str:
     return m.group(1) + "%" if m else "N/A"
 
 
+def _parse_reset(text: str, anchor: str) -> str | None:
+    """Reset clock that follows a section, e.g. '... used Resets 7pm' -> '19:00'.
+
+    The /usage TUI prints the reset as a local wall-clock time; ANSI stripping can
+    drop letters ('Resets' -> 'Reses'), so the anchor is matched loosely.
+    """
+    m = re.search(
+        anchor + r"\s*Rese[a-z]*\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if not m:
+        return None
+    hour = int(m.group(1))
+    minute = int(m.group(2) or 0)
+    ampm = m.group(3).lower()
+    if ampm == "pm" and hour != 12:
+        hour += 12
+    if ampm == "am" and hour == 12:
+        hour = 0
+    return f"{hour:02d}:{minute:02d}"
+
+
 def parse_usage(raw: str) -> dict:
     design = _parse_percent(raw, r"Claude\s*Design[^%]*?(\d+)\s*%\s*used")
     if design == "N/A":
@@ -151,6 +177,8 @@ def parse_usage(raw: str) -> dict:
         "Weekly All models": _parse_percent(raw, r"all\s*models[^%]*?(\d+)\s*%\s*used"),
         "Weekly Sonnet only": _parse_percent(raw, r"Sonnet\s*only[^%]*?(\d+)\s*%\s*used"),
         "Weekly Claude Design": design,
+        "Session reset": _parse_reset(raw, r"Curre[a-z]*\s*session[^%]*?\d+\s*%\s*used"),
+        "Weekly reset": _parse_reset(raw, r"all\s*models[^%]*?\d+\s*%\s*used"),
     }
 
 
@@ -160,6 +188,7 @@ def scrape_usage(retries: int = 3) -> dict:
     for attempt in range(retries):
         raw = _try_capture()
         try:
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
             DEBUG_FILE.write_text(raw, encoding="utf-8")
         except OSError:
             pass
@@ -177,6 +206,7 @@ def read_log() -> list:
 
 
 def append_log(entry: dict) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     entries = read_log()
     entries.append(entry)
     LOG_FILE.write_text(json.dumps(entries, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -234,6 +264,8 @@ def get_rings() -> dict:
         "all": _pct(latest.get("Weekly All models")),
         "sonnet": _pct(latest.get("Weekly Sonnet only")),
         "design": _pct(latest.get("Weekly Claude Design")),
+        "sessionReset": latest.get("Session reset"),
+        "weeklyReset": latest.get("Weekly reset"),
         "updated": updated or None,
     }
 

@@ -8,7 +8,8 @@ SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST="$HOME/.local/share/$APP_NAME"
 VENV="$DEST/.venv"
 CRON_MARKER="# claude-widget-usage"
-USAGE_LOG="$HOME/claude_usage_tracker.log"
+DATA_DIR="$HOME/.claude-widget"
+USAGE_LOG="$DATA_DIR/usage_cron.log"
 
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!! \033[0m %s\n' "$*" >&2; }
@@ -70,6 +71,7 @@ chmod +x "$DEST/run.sh"
 # 5. Usage-scraper cron (idempotent). Replaces any prior tracker line.
 #    Weekdays 9-18, every 30 min. Marker comment lets us dedupe on re-install.
 # ---------------------------------------------------------------------------
+mkdir -p "$DATA_DIR"
 CRON_CMD="*/30 9-18 * * 1-5 DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority $VENV/bin/python $DEST/usage.py >> $USAGE_LOG 2>&1 $CRON_MARKER"
 ( crontab -l 2>/dev/null \
     | grep -v -F "$CRON_MARKER" \

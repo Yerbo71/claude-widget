@@ -68,6 +68,23 @@ const compact = (n) => {
   return String(n);
 };
 const pctText = (p) => (p == null ? "—" : p + "%");
+
+function sessionResetText() {
+  const hm = state.rings && state.rings.sessionReset;
+  if (!hm) return "—";
+  const [hStr, mStr] = String(hm).split(":");
+  const H = Number(hStr);
+  const M = Number(mStr || 0);
+  if (Number.isNaN(H)) return "—";
+  const now = new Date();
+  const target = new Date(now);
+  target.setHours(H, M, 0, 0);
+  if (target <= now) target.setDate(target.getDate() + 1);
+  const mins = Math.max(0, Math.round((target - now) / 60000));
+  const hrs = Math.floor(mins / 60);
+  const rem = mins % 60;
+  return hrs <= 0 ? rem + " мин" : hrs + " ч " + rem + " мин";
+}
 const limitColor = (p) =>
   p >= 85 ? "var(--rose)" : p >= 60 ? "var(--warn)" : "var(--haiku)";
 
@@ -401,13 +418,28 @@ function renderRings() {
       h("span", { class: "errdetail" }, state.ringsError),
     );
   } else {
+    els.resetText = document.createTextNode(sessionResetText());
     foot = h(
       "div",
       { class: "reset" },
       icons.clock(),
-      " Лимиты обновлены ",
-      h("b", null, r.updated || "—"),
+      " Сброс сессии через ",
+      h("b", null, els.resetText),
     );
+    attachTip(foot, () => {
+      const lines = [];
+      if (r.sessionReset)
+        lines.push("Сессия: сброс в " + r.sessionReset);
+      if (r.weeklyReset) {
+        if (lines.length) lines.push(h("br"));
+        lines.push("Неделя: сброс в " + r.weeklyReset);
+      }
+      if (r.updated) {
+        if (lines.length) lines.push(h("br"));
+        lines.push("Обновлено " + r.updated);
+      }
+      return lines.length ? lines : ["Нет данных о сбросе"];
+    });
   }
   mount(els.ringsWrap, box, foot);
 }
@@ -770,6 +802,7 @@ function updateAgo() {
   else if (s < 60) txt = s + " сек назад";
   else txt = Math.floor(s / 60) + " мин назад";
   els.updText.nodeValue = "Обновлено " + txt;
+  if (els.resetText) els.resetText.nodeValue = sessionResetText();
 }
 
 /* ---------- boot ---------- */

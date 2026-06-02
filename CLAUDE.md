@@ -42,10 +42,15 @@ JS вызывает Python через `window.pywebview.api.*` (см. `web/app.j
 
 ## Расположение данных
 
-- `~/.claude/projects/**/*.jsonl` — логи сессий Claude Code (источник токенов).
+Виджет самодостаточен: всё своё пишет **только** в `~/.claude-widget/` и никогда
+не трогает другие папки в `$HOME`. Единственный внешний источник — логи Claude
+Code, и те открываются на чтение.
+
+- `~/.claude/projects/**/*.jsonl` — логи сессий Claude Code (источник токенов, read-only).
 - `~/.claude-widget/token_history.json` — запечатанная история токенов по дням.
-- `~/claude_usage_log.json` — снимки процентов лимитов (пишет `usage.py`).
-- `~/claude_usage_debug.txt` — сырой вывод последнего скрейпа `/usage` (для отладки).
+- `~/.claude-widget/usage_log.json` — снимки процентов лимитов (пишет `usage.py`).
+- `~/.claude-widget/usage_debug.txt` — сырой вывод последнего скрейпа `/usage` (для отладки).
+- `~/.claude-widget/usage_cron.log` — stdout cron-задачи скрейпера.
 
 ## Команды
 

@@ -78,10 +78,10 @@
   Проверьте, что есть пакет `gir1.2-webkit2-4.1` (или `-4.0`), и переустановите.
 - **Кольца показывают «—» или N/A** — виджет не смог снять `/usage`. Убедитесь,
   что команда `claude` запускается и вы залогинены. Сырой вывод последней попытки
-  лежит в `~/claude_usage_debug.txt`.
+  лежит в `~/.claude-widget/usage_debug.txt`.
 - **`claude: command not found` в логах cron** — CLI не в `PATH`. Положите его в
   `~/.local/bin/claude` или поправьте окружение в cron-задаче.
-- **Логи запуска по cron** — пишутся в `~/claude_usage_tracker.log`.
+- **Логи запуска по cron** — пишутся в `~/.claude-widget/usage_cron.log`.
 
 ## Удаление
 
@@ -95,5 +95,5 @@ rm -f ~/.config/autostart/claude-widget.desktop
 rm -rf ~/.local/share/claude-widget
 ```
 
-Накопленные данные (по желанию): `~/.claude-widget/`, `~/claude_usage_log.json`,
-`~/claude_usage_debug.txt`, `~/claude_usage_tracker.log`.
+Все данные виджета лежат в одном каталоге — `~/.claude-widget/` (история токенов,
+снимки лимитов, debug и cron-лог). Удалите его, если хотите стереть накопленное.
