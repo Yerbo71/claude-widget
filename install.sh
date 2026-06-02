@@ -44,7 +44,7 @@ fi
 # ---------------------------------------------------------------------------
 say "Installing app to $DEST"
 mkdir -p "$DEST"
-cp -f "$SRC_DIR/app.py" "$SRC_DIR/tokens.py" "$SRC_DIR/usage.py" "$DEST/"
+cp -f "$SRC_DIR/app.py" "$SRC_DIR/tokens.py" "$SRC_DIR/usage.py" "$SRC_DIR/icon.svg" "$DEST/"
 rm -rf "$DEST/web"
 cp -r "$SRC_DIR/web" "$DEST/web"
 
@@ -92,7 +92,7 @@ Type=Application
 Name=Claude Usage
 Comment=Claude usage limits & token statistics
 Exec=$DEST/run.sh
-Icon=utilities-system-monitor
+Icon=$DEST/icon.svg
 Terminal=false
 Categories=Utility;
 StartupNotify=false
