@@ -14,6 +14,9 @@ USAGE_LOG="$DATA_DIR/usage_cron.log"
 say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!! \033[0m %s\n' "$*" >&2; }
 
+# Report where we die so install failures are never silent.
+trap 'rc=$?; [ "$rc" -ne 0 ] && warn "install.sh aborted at line ${BASH_LINENO[0]:-$LINENO} (exit $rc)"' ERR
+
 # ---------------------------------------------------------------------------
 # 1. System dependencies (apt-based distros).
 # ---------------------------------------------------------------------------
@@ -49,16 +52,9 @@ rm -rf "$DEST/web"
 cp -r "$SRC_DIR/web" "$DEST/web"
 
 # ---------------------------------------------------------------------------
-# 3. Virtualenv (with system site-packages so it can use gi/WebKit) + pywebview.
-# ---------------------------------------------------------------------------
-say "Creating venv at $VENV"
-python3 -m venv --system-site-packages "$VENV"
-"$VENV/bin/python" -m pip install --upgrade pip >/dev/null
-say "Installing pywebview"
-"$VENV/bin/python" -m pip install pywebview
-
-# ---------------------------------------------------------------------------
-# 4. Run wrapper (used by the launcher and autostart).
+# 3. Run wrapper + desktop launcher + autostart entry.
+#    Created early (before venv/pip/cron) so the app-menu icon always appears,
+#    even if a later step fails on this machine.
 # ---------------------------------------------------------------------------
 cat > "$DEST/run.sh" <<EOF
 #!/usr/bin/env bash
@@ -67,26 +63,6 @@ exec "$VENV/bin/python" "$DEST/app.py"
 EOF
 chmod +x "$DEST/run.sh"
 
-# ---------------------------------------------------------------------------
-# 5. Usage-scraper cron (idempotent). Replaces any prior tracker line.
-#    Weekdays 9-18, every 30 min. Marker comment lets us dedupe on re-install.
-# ---------------------------------------------------------------------------
-mkdir -p "$DATA_DIR"
-CRON_CMD="*/30 9-18 * * 1-5 DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority $VENV/bin/python $DEST/usage.py >> $USAGE_LOG 2>&1 $CRON_MARKER"
-if command -v crontab >/dev/null 2>&1; then
-  existing="$(crontab -l 2>/dev/null || true)"
-  filtered="$(printf '%s\n' "$existing" \
-      | grep -v -F "$CRON_MARKER" \
-      | grep -v -F "claude_usage_tracker.py" || true)"
-  printf '%s\n' "$filtered" "$CRON_CMD" | grep -v '^$' | crontab -
-  say "Cron installed (weekdays 09:00-18:00, every 30 min)"
-else
-  warn "crontab not found; skipping usage cron (the widget still works)."
-fi
-
-# ---------------------------------------------------------------------------
-# 6. Desktop launcher + autostart entry.
-# ---------------------------------------------------------------------------
 APPS="$HOME/.local/share/applications"
 AUTO="$HOME/.config/autostart"
 mkdir -p "$APPS" "$AUTO"
@@ -104,5 +80,32 @@ StartupNotify=false
 EOF
 cp -f "$DESKTOP_FILE" "$AUTO/$APP_NAME.desktop"
 command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS" 2>/dev/null || true
+say "Desktop launcher installed: $DESKTOP_FILE"
+
+# ---------------------------------------------------------------------------
+# 4. Virtualenv (with system site-packages so it can use gi/WebKit) + pywebview.
+# ---------------------------------------------------------------------------
+say "Creating venv at $VENV"
+python3 -m venv --system-site-packages "$VENV"
+"$VENV/bin/python" -m pip install --upgrade pip >/dev/null
+say "Installing pywebview"
+"$VENV/bin/python" -m pip install pywebview
+
+# ---------------------------------------------------------------------------
+# 5. Usage-scraper cron (idempotent). Replaces any prior tracker line.
+#    Weekdays 9-18, every 30 min. Marker comment lets us dedupe on re-install.
+# ---------------------------------------------------------------------------
+mkdir -p "$DATA_DIR"
+CRON_CMD="*/30 9-18 * * 1-5 DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority $VENV/bin/python $DEST/usage.py >> $USAGE_LOG 2>&1 $CRON_MARKER"
+if command -v crontab >/dev/null 2>&1; then
+  existing="$(crontab -l 2>/dev/null || true)"
+  filtered="$(printf '%s\n' "$existing" \
+      | grep -v -F "$CRON_MARKER" \
+      | grep -v -F "claude_usage_tracker.py" || true)"
+  printf '%s\n' "$filtered" "$CRON_CMD" | grep -v '^$' | crontab -
+  say "Cron installed (weekdays 09:00-18:00, every 30 min)"
+else
+  warn "crontab not found; skipping usage cron (the widget still works)."
+fi
 
 say "Done. Launch 'Claude Usage' from the app menu, or run: $DEST/run.sh"
