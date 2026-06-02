@@ -267,7 +267,6 @@ function themeIcon() {
 function buildSettingsPanel() {
   els.notifyToggle = h("input", { type: "checkbox" });
   els.notifyToggle.checked = !!state.settings.notifyEnabled;
-  els.notifyToggle.addEventListener("change", saveSettings);
 
   els.thresholdInput = h("input", {
     type: "number",
@@ -276,21 +275,25 @@ function buildSettingsPanel() {
     step: "1",
   });
   els.thresholdInput.value = String(state.settings.notifyThreshold);
-  els.thresholdInput.addEventListener("change", saveSettings);
+
+  els.applyBtn = h("button", { class: "set-apply", type: "button" }, "Применить");
+  els.applyBtn.addEventListener("click", saveSettings);
+  els.saveStatus = h("span", { class: "set-status" }, "Сохранено");
 
   return h(
     "div",
     { class: "settings", style: "display:none" },
+    h("div", { class: "set-head" }, "Уведомления"),
     h(
       "label",
       { class: "set-row" },
-      els.notifyToggle,
-      h("span", null, "Уведомления"),
+      h("span", { class: "set-label" }, "Оповещать о превышении"),
+      h("span", { class: "switch" }, els.notifyToggle, h("span", { class: "slider" })),
     ),
     h(
       "label",
       { class: "set-row" },
-      h("span", null, "Порог, %"),
+      h("span", { class: "set-label" }, "Порог, %"),
       els.thresholdInput,
     ),
     h(
@@ -298,6 +301,7 @@ function buildSettingsPanel() {
       { class: "set-hint" },
       "Уведомление при превышении лимита текущей сессии.",
     ),
+    h("div", { class: "set-foot" }, els.saveStatus, els.applyBtn),
   );
 }
 
@@ -330,6 +334,14 @@ async function saveSettings() {
     console.error(e);
     applySettings(cfg);
   }
+  flashSaved();
+}
+
+function flashSaved() {
+  if (!els.saveStatus) return;
+  els.saveStatus.classList.add("show");
+  clearTimeout(flashSaved._t);
+  flashSaved._t = setTimeout(() => els.saveStatus.classList.remove("show"), 1800);
 }
 
 function tabButton(name, iconNode, label) {
