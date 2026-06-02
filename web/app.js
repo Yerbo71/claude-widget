@@ -531,73 +531,57 @@ function renderTokens() {
   if (state.open) els.models.style.maxHeight = els.models.scrollHeight + "px";
 }
 
-/* ---------- history ---------- */
+/* ---------- history (simple per-day list) ---------- */
 
-function hcard(cl, cv, cu) {
-  return h(
-    "div",
-    { class: "c" },
-    h("div", { class: "cl" }, cl),
-    h("div", { class: "cv" }, cv),
-    h("div", { class: "cu" }, cu),
-  );
+function dayLabel(fromEnd, dmm) {
+  if (fromEnd === 0) return "Сегодня";
+  if (fromEnd === 1) return "Вчера";
+  return dmm;
 }
 
-function legendItem(color, label) {
-  return h("span", null, h("i", { style: "background:" + color }), label);
-}
-
-function barCol(r, today, maxTotal, chartH) {
+function histRow(r, label, isToday) {
   const tot = r.in + r.out;
-  const inH = (r.in / maxTotal) * chartH;
-  const outH = (r.out / maxTotal) * chartH;
-  const segOut = h("div", {
-    class: "seg",
-    style: "height:0;background:var(--clay)",
-  });
-  const segIn = h("div", {
-    class: "seg",
-    style: "height:0;background:var(--sonnet)",
-  });
-  const stack = h("div", { class: "bstack" }, segOut, segIn);
+  const p = r.limit;
+  const lim = h(
+    "span",
+    {
+      class: "hlim",
+      style:
+        p == null
+          ? null
+          : "color:" + limitColor(p) + ";border-color:" + limitColor(p),
+    },
+    p == null ? "—" : p + "%",
+  );
   const el = h(
     "div",
-    { class: "bcol" + (today ? " today" : "") },
-    stack,
-    h("span", { class: "blabel" }, r.d.slice(0, 2)),
+    { class: "hrow" + (isToday ? " today" : "") },
+    h(
+      "div",
+      { class: "hday" },
+      h("span", { class: "d" }, label),
+      h(
+        "span",
+        { class: "io" },
+        "вход " + compact(r.in) + " · выход " + compact(r.out),
+      ),
+    ),
+    h(
+      "div",
+      { class: "htok" },
+      h("span", { class: "v" }, compact(tot)),
+      h("span", { class: "u" }, "ткн"),
+    ),
+    lim,
   );
-  raf2(() => {
-    segOut.style.height = outH + "px";
-    segIn.style.height = inH + "px";
-  });
   attachTip(el, () => [
     h("span", { class: "k" }, r.d),
-    " · " + fmt(tot) + " ткн",
+    " · " + fmt(tot) + " токенов",
     h("br"),
-    "вход " + compact(r.in) + " · выход " + compact(r.out),
-  ]);
-  return el;
-}
-
-function limCol(r, limH) {
-  const p = r.limit;
-  const hgt = p == null ? 3 : Math.max((p / 100) * limH, 3);
-  const color = p == null ? "var(--track)" : limitColor(p);
-  const bar = h("div", {
-    class: "lbar",
-    style: "height:0;background:" + color,
-  });
-  const el = h("div", { class: "lcol" }, bar);
-  raf2(() => (bar.style.height = hgt + "px"));
-  attachTip(el, () =>
     p == null
-      ? [h("span", { class: "k" }, r.d), " · нет данных лимита"]
-      : [
-          h("span", { class: "k" }, r.d),
-          " · пик лимита ",
-          h("span", { class: "k" }, p + "%"),
-        ],
-  );
+      ? "лимит: нет данных"
+      : ["пик лимита ", h("span", { class: "k" }, p + "%")],
+  ]);
   return el;
 }
 
@@ -607,26 +591,10 @@ function renderHistory() {
     mount(els.history, empty("История накапливается по дням."));
     return;
   }
-
-  const sum = rows.reduce((s, r) => s + r.in + r.out, 0);
-  const avg = Math.round(sum / rows.length);
-  let peak = rows[0];
-  for (const r of rows) if (r.in + r.out > peak.in + peak.out) peak = r;
-
-  const hsum = h(
+  const head = h(
     "div",
-    { class: "hsum" },
-    hcard("Σ за период", compact(sum), fmt(sum) + " ткн"),
-    hcard("Ср./день", compact(avg), "токенов в день"),
-    hcard("Пик", compact(peak.in + peak.out), peak.d),
-  );
-
-  const chartH = 116;
-  const maxTotal = Math.max(...rows.map((r) => r.in + r.out), 1);
-  const tokHead = h(
-    "div",
-    { class: "csec-head" },
-    h("span", { class: "lbl" }, "Токены по дням"),
+    { class: "sec-head", style: "margin-top:16px" },
+    h("span", { class: "lbl" }, "По дням"),
     h(
       "div",
       { class: "seg" },
@@ -634,47 +602,18 @@ function renderHistory() {
       segBtn("14д", state.span === 14, () => setSpan(14)),
     ),
   );
-  const tokLegend = h(
+  const n = rows.length;
+  const list = h(
     "div",
-    { class: "legend" },
-    legendItem("var(--sonnet)", "Входные"),
-    legendItem("var(--clay)", "Выходные"),
+    { class: "hlist" },
+    rows
+      .map((r, i) => {
+        const fromEnd = n - 1 - i;
+        return histRow(r, dayLabel(fromEnd, r.d), fromEnd === 0);
+      })
+      .reverse(),
   );
-  const bars = h(
-    "div",
-    { class: "bars" },
-    rows.map((r, i) => barCol(r, i === rows.length - 1, maxTotal, chartH)),
-  );
-  const tokSec = h("div", { class: "csec" }, tokHead, tokLegend, bars);
-
-  const limH = 56;
-  const limHead = h(
-    "div",
-    { class: "csec-head" },
-    h("span", { class: "lbl" }, "Лимиты по дням"),
-    h("span", { class: "lbl", style: "letter-spacing:.02em" }, "пиковый %"),
-  );
-  const thresh = h(
-    "div",
-    { class: "thresh", style: "bottom:" + (80 / 100) * limH + "px" },
-    h("span", null, "80%"),
-  );
-  const lim = h(
-    "div",
-    { class: "lim" },
-    thresh,
-    ...rows.map((r) => limCol(r, limH)),
-  );
-  const limLegend = h(
-    "div",
-    { class: "legend", style: "margin-top:11px" },
-    legendItem("var(--haiku)", "<60%"),
-    legendItem("var(--warn)", "60–84%"),
-    legendItem("var(--rose)", "≥85%"),
-  );
-  const limSec = h("div", { class: "csec" }, limHead, lim, limLegend);
-
-  mount(els.history, hsum, tokSec, limSec);
+  mount(els.history, head, list);
 }
 
 /* ---------- actions ---------- */
