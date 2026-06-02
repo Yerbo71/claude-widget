@@ -263,25 +263,27 @@ def _design_tokens(d: dict, period: str) -> dict:
     models = []
     for model, m in (d.get("byModel") or {}).items():
         meta = model_meta(model)
-        m_in = _eff_in(m)
+        m_cache = m["cache_read"] + m["cache_creation"]
         models.append(
             {
                 "key": meta["key"],
                 "name": meta["name"],
                 "color": meta["color"],
-                "in": m_in,
+                "in": m["input"],
+                "cache": m_cache,
                 "out": m["output"],
                 "req": m["messages"],
-                "total": m_in + m["output"],
+                "total": m["input"] + m_cache + m["output"],
             }
         )
     models.sort(key=lambda x: x["total"], reverse=True)
-    eff_in = _eff_in(d)
+    cache = d["cache_read"] + d["cache_creation"]
     return {
         "period": period,
-        "in": eff_in,
+        "in": d["input"],
+        "cache": cache,
         "out": d["output"],
-        "total": eff_in + d["output"],
+        "total": d["input"] + cache + d["output"],
         "messages": d["messages"],
         "models": models,
     }

@@ -425,7 +425,11 @@ function modelRow(m, maxM) {
       "div",
       { class: "mval" },
       h("div", { class: "tk" }, compact(m.total)),
-      h("div", { class: "io" }, compact(m.in) + " / " + compact(m.out)),
+      h(
+        "div",
+        { class: "io" },
+        compact(m.in) + " / " + compact(m.cache) + " / " + compact(m.out),
+      ),
     ),
   );
   raf2(() => (bar.style.width = (m.total / maxM) * 100 + "%"));
@@ -460,7 +464,7 @@ function toggleModels() {
 }
 
 function renderTokens() {
-  const t = state.tokens || { in: 0, out: 0, total: 0, models: [] };
+  const t = state.tokens || { in: 0, cache: 0, out: 0, total: 0, models: [] };
 
   const seg = h(
     "div",
@@ -493,6 +497,15 @@ function renderTokens() {
       tip: () => ["Выходные токены: ", h("span", { class: "k" }, fmt(t.out))],
     }),
     tile({
+      cap: "Кеш",
+      dot: "var(--ink-3)",
+      num: t.cache,
+      tip: () => [
+        "Кеш (чтение + запись): ",
+        h("span", { class: "k" }, fmt(t.cache)),
+      ],
+    }),
+    tile({
       cap: "Всего",
       total: true,
       num: t.total,
@@ -517,7 +530,7 @@ function renderTokens() {
       h(
         "span",
         { class: "lbl", style: "color:var(--ink-3);letter-spacing:.02em" },
-        "токены · вход / выход",
+        "токены · вход / кеш / выход",
       ),
     );
     mount(els.models, head, ...models.map((m) => modelRow(m, maxM)));
