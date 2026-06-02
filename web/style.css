@@ -250,8 +250,21 @@ body {
 }
 
 /* reset timer */
-.reset {
+.reset-wrap {
   margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+.reset-upd {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--ink-2);
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+.reset {
   display: flex;
   align-items: center;
   justify-content: center;

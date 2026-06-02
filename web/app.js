@@ -419,14 +419,14 @@ function renderRings() {
     );
   } else {
     els.resetText = document.createTextNode(sessionResetText());
-    foot = h(
+    const pill = h(
       "div",
       { class: "reset" },
       icons.clock(),
       " Сброс сессии через ",
       h("b", null, els.resetText),
     );
-    attachTip(foot, () => {
+    attachTip(pill, () => {
       const lines = [];
       if (r.sessionReset)
         lines.push("Сессия: сброс в " + r.sessionReset);
@@ -440,6 +440,16 @@ function renderRings() {
       }
       return lines.length ? lines : ["Нет данных о сбросе"];
     });
+    foot = h(
+      "div",
+      { class: "reset-wrap" },
+      pill,
+      h(
+        "div",
+        { class: "reset-upd" },
+        "Обновлено " + (r.updated || "—"),
+      ),
+    );
   }
   mount(els.ringsWrap, box, foot);
 }
@@ -746,6 +756,20 @@ async function refreshTokens() {
   }
 }
 
+async function reloadRings() {
+  if (state.refreshing) return;
+  try {
+    const r = await api().get_rings();
+    if (r) {
+      state.rings = r;
+      state.ringsError = null;
+      renderRings();
+    }
+  } catch (e) {
+    console.error(e);
+  }
+}
+
 async function onRefreshUsage() {
   if (state.refreshing) return;
   state.refreshing = true;
@@ -834,6 +858,7 @@ async function boot() {
   updateAgo();
 
   setInterval(refreshTokens, 30000);
+  setInterval(reloadRings, 30000);
   setInterval(updateAgo, 5000);
 }
 
