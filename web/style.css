@@ -1,0 +1,276 @@
+:root {
+  --bg: #16181d;
+  --panel: #1e2128;
+  --panel-2: #262a33;
+  --text: #e6e8ec;
+  --muted: #8b919e;
+  --accent: #d97757;
+  --accent-2: #5b8def;
+  --good: #4caf7d;
+  --warn: #e0b450;
+  --bad: #e0685a;
+  --border: #2e333d;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, "Segoe UI", Roboto, Ubuntu, sans-serif;
+  font-size: 13px;
+  height: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 12px 14px 8px;
+}
+.title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+.daylabel {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border);
+}
+.tab {
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 8px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px 18px;
+}
+
+.tabpane {
+  display: none;
+}
+.tabpane.active {
+  display: block;
+}
+
+.block {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.block-head.sub {
+  margin-top: 12px;
+  margin-bottom: 6px;
+}
+.block-head h2 {
+  font-size: 13px;
+  font-weight: 600;
+}
+.block-head h3 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.head-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 7px;
+  padding: 5px 11px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 11px;
+}
+.hint {
+  color: var(--muted);
+  font-size: 10.5px;
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+/* gauges */
+.gauges {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.gauge .g-top {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.gauge .g-pct {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.bar {
+  height: 7px;
+  background: var(--panel-2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--accent-2);
+  transition: width 0.3s;
+}
+.bar.lvl-good > span {
+  background: #4caf7d;
+}
+.bar.lvl-warn > span {
+  background: var(--warn);
+}
+.bar.lvl-bad > span {
+  background: var(--bad);
+}
+
+/* token cards */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.card {
+  background: var(--panel-2);
+  border-radius: 8px;
+  padding: 9px 10px;
+}
+.card.total {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, #2a2f3a, #242832);
+}
+.card .c-label {
+  font-size: 10.5px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.card .c-value {
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+.card .c-sub {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+
+/* models */
+.models {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--panel-2);
+  border-radius: 7px;
+  padding: 7px 9px;
+}
+.model-row .m-name {
+  font-size: 11.5px;
+}
+.model-row .m-val {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.model-row .m-sub {
+  font-size: 10px;
+  color: var(--muted);
+}
+.dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+/* tables */
+.table-wrap {
+  overflow-x: auto;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+th,
+td {
+  text-align: right;
+  padding: 5px 6px;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+th:first-child,
+td:first-child {
+  text-align: left;
+}
+th {
+  color: var(--muted);
+  font-weight: 500;
+}
+.empty {
+  color: var(--muted);
+  font-size: 11.5px;
+  padding: 6px 2px;
+}

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Claude Usage
+Comment=Claude usage limits & token statistics
+Exec=sh -c "$HOME/.local/share/claude-widget/run.sh"
+Icon=utilities-system-monitor
+Terminal=false
+Categories=Utility;
+StartupNotify=false

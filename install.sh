@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# All-in-one installer for the Claude Usage widget.
+# Sets up system deps, a venv with pywebview, the usage cron, and a desktop launcher.
+set -euo pipefail
+
+APP_NAME="claude-widget"
+SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEST="$HOME/.local/share/$APP_NAME"
+VENV="$DEST/.venv"
+CRON_MARKER="# claude-widget-usage"
+USAGE_LOG="$HOME/claude_usage_tracker.log"
+
+say() { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m!! \033[0m %s\n' "$*" >&2; }
+
+# ---------------------------------------------------------------------------
+# 1. System dependencies (apt-based distros).
+# ---------------------------------------------------------------------------
+install_system_deps() {
+  local pkgs=(python3-venv python3-gi python3-gi-cairo gir1.2-gtk-3.0 libgtk-3-0)
+  # WebKit gir package name differs by Ubuntu version: probe 4.1, then 4.0.
+  if apt-cache show gir1.2-webkit2-4.1 >/dev/null 2>&1; then
+    pkgs+=(gir1.2-webkit2-4.1)
+  elif apt-cache show gir1.2-webkit2-4.0 >/dev/null 2>&1; then
+    pkgs+=(gir1.2-webkit2-4.0)
+  else
+    warn "No gir1.2-webkit2-4.x candidate found; the window may not render."
+  fi
+  say "Installing system packages: ${pkgs[*]}"
+  sudo apt-get update -y
+  sudo apt-get install -y "${pkgs[@]}"
+}
+
+if command -v apt-get >/dev/null 2>&1; then
+  install_system_deps
+else
+  warn "Non-apt distro detected. Ensure these are installed: python3-venv, PyGObject (gi),"
+  warn "GTK3 and WebKit2GTK GObject-introspection bindings. Continuing anyway."
+fi
+
+# ---------------------------------------------------------------------------
+# 2. Copy application files.
+# ---------------------------------------------------------------------------
+say "Installing app to $DEST"
+mkdir -p "$DEST"
+cp -f "$SRC_DIR/app.py" "$SRC_DIR/tokens.py" "$SRC_DIR/usage.py" "$DEST/"
+rm -rf "$DEST/web"
+cp -r "$SRC_DIR/web" "$DEST/web"
+
+# ---------------------------------------------------------------------------
+# 3. Virtualenv (with system site-packages so it can use gi/WebKit) + pywebview.
+# ---------------------------------------------------------------------------
+say "Creating venv at $VENV"
+python3 -m venv --system-site-packages "$VENV"
+"$VENV/bin/python" -m pip install --upgrade pip >/dev/null
+say "Installing pywebview"
+"$VENV/bin/python" -m pip install pywebview
+
+# ---------------------------------------------------------------------------
+# 4. Run wrapper (used by the launcher and autostart).
+# ---------------------------------------------------------------------------
+cat > "$DEST/run.sh" <<EOF
+#!/usr/bin/env bash
+cd "$DEST"
+exec "$VENV/bin/python" "$DEST/app.py"
+EOF
+chmod +x "$DEST/run.sh"
+
+# ---------------------------------------------------------------------------
+# 5. Usage-scraper cron (idempotent). Replaces any prior tracker line.
+#    Weekdays 9-18, every 30 min. Marker comment lets us dedupe on re-install.
+# ---------------------------------------------------------------------------
+CRON_CMD="*/30 9-18 * * 1-5 DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority $VENV/bin/python $DEST/usage.py >> $USAGE_LOG 2>&1 $CRON_MARKER"
+( crontab -l 2>/dev/null \
+    | grep -v -F "$CRON_MARKER" \
+    | grep -v -F "claude_usage_tracker.py"; \
+  echo "$CRON_CMD" ) | crontab -
+say "Cron installed (weekdays 09:00-18:00, every 30 min)"
+
+# ---------------------------------------------------------------------------
+# 6. Desktop launcher + autostart entry.
+# ---------------------------------------------------------------------------
+APPS="$HOME/.local/share/applications"
+AUTO="$HOME/.config/autostart"
+mkdir -p "$APPS" "$AUTO"
+DESKTOP_FILE="$APPS/$APP_NAME.desktop"
+cat > "$DESKTOP_FILE" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Claude Usage
+Comment=Claude usage limits & token statistics
+Exec=$DEST/run.sh
+Icon=utilities-system-monitor
+Terminal=false
+Categories=Utility;
+StartupNotify=false
+EOF
+cp -f "$DESKTOP_FILE" "$AUTO/$APP_NAME.desktop"
+command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$APPS" 2>/dev/null || true
+
+say "Done. Launch 'Claude Usage' from the app menu, or run: $DEST/run.sh"

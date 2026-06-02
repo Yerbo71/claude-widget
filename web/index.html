@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Usage</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="title">Claude Usage</div>
+    <div class="daylabel" id="day-label">—</div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="today">Сегодня</button>
+    <button class="tab" data-tab="history">История</button>
+  </nav>
+
+  <main>
+    <!-- TODAY -->
+    <section id="tab-today" class="tabpane active">
+      <div class="block">
+        <div class="block-head">
+          <h2>Лимиты</h2>
+          <div class="head-right">
+            <span class="muted" id="usage-updated">—</span>
+            <button id="refresh-usage" class="btn">Обновить</button>
+          </div>
+        </div>
+        <div id="gauges" class="gauges"></div>
+        <div class="hint">Лимиты обновляются по cron (будни 9–18, каждые 30 мин) или вручную.</div>
+      </div>
+
+      <div class="block">
+        <div class="block-head"><h2>Токены за сегодня</h2></div>
+        <div id="token-cards" class="cards"></div>
+        <div class="block-head sub"><h3>По моделям</h3></div>
+        <div id="token-models" class="models"></div>
+      </div>
+    </section>
+
+    <!-- HISTORY -->
+    <section id="tab-history" class="tabpane">
+      <div class="block">
+        <div class="block-head"><h2>Токены по дням</h2></div>
+        <div id="hist-tokens" class="table-wrap"></div>
+      </div>
+      <div class="block">
+        <div class="block-head"><h2>Лимиты по дням</h2></div>
+        <div id="hist-usage" class="table-wrap"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
