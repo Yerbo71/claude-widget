@@ -128,6 +128,13 @@ const icons = {
     svgIcon({ sw: 2.4 }, [svgEl("path", { d: "M12 5v14M19 12l-7 7-7-7" })]),
   arrowUp: () =>
     svgIcon({ sw: 2.4 }, [svgEl("path", { d: "M12 19V5M5 12l7-7 7 7" })]),
+  warn: () =>
+    svgIcon({}, [
+      svgEl("path", {
+        d: "M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h16.9a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z",
+      }),
+      svgEl("path", { d: "M12 9v4M12 17h.01" }),
+    ]),
 };
 
 function mark() {
@@ -191,7 +198,8 @@ const state = {
   period: "day",
   span: 7,
   open: true,
-  spinning: false,
+  refreshing: false,
+  ringsError: null,
   rings: null,
   tokens: null,
   history: null,
@@ -365,14 +373,43 @@ function renderRings() {
       ],
     }),
   );
-  const reset = h(
+  const box = h(
     "div",
-    { class: "reset" },
-    icons.clock(),
-    " Лимиты обновлены ",
-    h("b", null, r.updated || "—"),
+    { class: "rings-box" + (state.refreshing ? " loading" : "") },
+    grid,
+    state.refreshing
+      ? h(
+          "div",
+          { class: "rings-overlay" },
+          h("span", { class: "spinner" }),
+          h("span", null, "Обновление лимитов…"),
+        )
+      : null,
   );
-  mount(els.ringsWrap, grid, reset);
+
+  let foot;
+  if (!state.refreshing && state.ringsError) {
+    foot = h(
+      "div",
+      { class: "rings-error" },
+      h(
+        "div",
+        { class: "errhead" },
+        icons.warn(),
+        h("span", null, "Не удалось обновить лимиты"),
+      ),
+      h("span", { class: "errdetail" }, state.ringsError),
+    );
+  } else {
+    foot = h(
+      "div",
+      { class: "reset" },
+      icons.clock(),
+      " Лимиты обновлены ",
+      h("b", null, r.updated || "—"),
+    );
+  }
+  mount(els.ringsWrap, box, foot);
 }
 
 /* ---------- tokens ---------- */
@@ -678,25 +715,35 @@ async function refreshTokens() {
 }
 
 async function onRefreshUsage() {
-  if (state.spinning) return;
-  state.spinning = true;
+  if (state.refreshing) return;
+  state.refreshing = true;
+  state.ringsError = null;
   els.refreshBtn.classList.add("spin");
   els.refreshBtn.disabled = true;
+  renderRings();
   try {
     const r = await api().refresh_usage();
-    if (r) {
+    if (r && r.error) {
       state.rings = r;
-      if (r.error) console.warn("usage refresh error:", r.error);
+      state.ringsError = r.error;
+    } else if (r) {
+      state.rings = r;
+      if (r.session == null && r.all == null && r.sonnet == null) {
+        state.ringsError = "Не удалось прочитать /usage. Попробуйте ещё раз.";
+      }
+    } else {
+      state.ringsError = "Пустой ответ от /usage.";
     }
-    renderRings();
     state.updatedAt = new Date();
     updateAgo();
   } catch (e) {
     console.error(e);
+    state.ringsError = String((e && e.message) || e) || "Ошибка обновления";
   } finally {
-    state.spinning = false;
+    state.refreshing = false;
     els.refreshBtn.disabled = false;
-    setTimeout(() => els.refreshBtn.classList.remove("spin"), 700);
+    els.refreshBtn.classList.remove("spin");
+    renderRings();
   }
 }
 
