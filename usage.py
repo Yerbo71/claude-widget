@@ -66,10 +66,41 @@ def write_config(cfg: dict) -> dict:
 
 
 def claude_bin() -> str:
-    candidate = Path.home() / ".local" / "bin" / "claude"
-    if candidate.exists():
-        return str(candidate)
-    return shutil.which("claude") or str(candidate)
+    """Resolve the Claude Code CLI the way a terminal would.
+
+    GUI launchers and cron start with a minimal PATH, so instead of guessing
+    install locations we ask the user's login shell to resolve `claude` — it
+    sources their profile (nvm, npm prefixes, ~/.local/bin, …) exactly like an
+    interactive terminal. An explicit CLAUDE_BIN override wins.
+    """
+    override = os.environ.get("CLAUDE_BIN")
+    if override and Path(override).exists():
+        return override
+
+    shell = os.environ.get("SHELL") or "/bin/bash"
+    try:
+        result = subprocess.run(
+            [shell, "-lc", "command -v claude"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        # Profile output can precede the path; take the last line that resolves.
+        for line in reversed(result.stdout.splitlines()):
+            line = line.strip()
+            if line and Path(line).exists():
+                return line
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    found = shutil.which("claude")
+    if found:
+        return found
+
+    raise FileNotFoundError(
+        "Claude Code CLI ('claude') не найден через login-шелл. Убедитесь, что "
+        "`claude` работает в терминале, либо задайте путь через CLAUDE_BIN."
+    )
 
 
 def is_business_hours() -> bool:
