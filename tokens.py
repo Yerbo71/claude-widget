@@ -3,7 +3,8 @@
 
 import glob
 import json
-from datetime import datetime, timedelta, timezone
+import re
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 PROJECTS_DIR = Path.home() / ".claude" / "projects"
@@ -198,6 +199,124 @@ def get_history(limit: int = 30) -> list[dict]:
     return past[:limit]
 
 
+# ---------------------------------------------------------------------------
+# Design-shaped views: effective input, prettified model names, period totals.
+# ---------------------------------------------------------------------------
+
+_FAMILY_COLOR = {"opus": "var(--opus)", "sonnet": "var(--sonnet)", "haiku": "var(--haiku)"}
+_PALETTE = ["#5B8DEF", "#E0B450", "#A979E0", "#56B6C2", "#C9614B"]
+
+
+def _eff_in(d: dict) -> int:
+    """Effective input: the prompt lives in the cache fields, raw input is tiny."""
+    return d["input"] + d["cache_read"] + d["cache_creation"]
+
+
+def _family(model: str) -> str:
+    low = model.lower()
+    for fam in ("opus", "sonnet", "haiku"):
+        if fam in low:
+            return fam
+    return ""
+
+
+def _pretty_name(model: str) -> str:
+    name = re.sub(r"^claude-", "", model)
+    name = re.sub(r"-\d{8}$", "", name)  # drop trailing yyyymmdd build stamp
+    parts = [p for p in name.split("-") if p]
+    if not parts:
+        return model
+    family = parts[0].capitalize()
+    version = ".".join(parts[1:])
+    return f"Claude {family}" + (f" {version}" if version else "")
+
+
+def model_meta(model: str) -> dict:
+    fam = _family(model)
+    if fam:
+        return {"key": fam, "name": _pretty_name(model), "color": _FAMILY_COLOR[fam]}
+    idx = sum(ord(c) for c in model) % len(_PALETTE)
+    return {"key": model, "name": _pretty_name(model), "color": _PALETTE[idx]}
+
+
+def _merge_days(day_dicts: list[dict]) -> dict:
+    out = _empty_day("")
+    for d in day_dicts:
+        for k in ("input", "output", "cache_read", "cache_creation", "total", "narrow", "messages"):
+            out[k] += d.get(k, 0)
+        for model, m in (d.get("byModel") or {}).items():
+            dst = out["byModel"].setdefault(
+                model,
+                {"input": 0, "output": 0, "cache_read": 0, "cache_creation": 0, "total": 0, "messages": 0},
+            )
+            for k in ("input", "output", "cache_read", "cache_creation", "total", "messages"):
+                dst[k] += m.get(k, 0)
+    return out
+
+
+def _recent_logical_days(n: int) -> list[str]:
+    today = logical_day(datetime.now(timezone.utc))
+    return [(today - timedelta(days=i)).isoformat() for i in range(n)]
+
+
+def _design_tokens(d: dict, period: str) -> dict:
+    models = []
+    for model, m in (d.get("byModel") or {}).items():
+        meta = model_meta(model)
+        m_in = _eff_in(m)
+        models.append(
+            {
+                "key": meta["key"],
+                "name": meta["name"],
+                "color": meta["color"],
+                "in": m_in,
+                "out": m["output"],
+                "req": m["messages"],
+                "total": m_in + m["output"],
+            }
+        )
+    models.sort(key=lambda x: x["total"], reverse=True)
+    eff_in = _eff_in(d)
+    return {
+        "period": period,
+        "in": eff_in,
+        "out": d["output"],
+        "total": eff_in + d["output"],
+        "messages": d["messages"],
+        "models": models,
+    }
+
+
+def get_tokens(period: str = "day") -> dict:
+    """Token totals shaped for the widget: period sums + per-model breakdown."""
+    if period == "week":
+        days = _aggregate(only_recent_hours=180)
+        wanted = set(_recent_logical_days(7))
+        merged = _merge_days([d for k, d in days.items() if k in wanted])
+        return _design_tokens(merged, "week")
+    return _design_tokens(get_today(), "day")
+
+
+def get_series(limit: int = 14) -> list[dict]:
+    """Per-day in/out series (ascending) for the history chart, with DD.MM labels."""
+    today_day = current_logical_day()
+    days = dict(_load_store())
+    for k, d in _aggregate(only_recent_hours=180).items():
+        days[k] = d  # logs are more accurate than the sealed store
+    days[today_day] = get_today()
+
+    out = []
+    for k in sorted(days.keys())[-limit:]:
+        d = days[k]
+        try:
+            label = date.fromisoformat(k).strftime("%d.%m")
+        except ValueError:
+            label = k
+        eff_in = _eff_in(d)
+        out.append({"date": k, "d": label, "in": eff_in, "out": d["output"], "total": eff_in + d["output"]})
+    return out
+
+
 if __name__ == "__main__":
     import pprint
     print("current logical day:", current_logical_day())
@@ -207,3 +326,10 @@ if __name__ == "__main__":
     for d in get_history(5):
         print(d["day"], "total=", d["total"], "in=", d["input"], "out=", d["output"],
               "models=", list(d["byModel"]))
+    print("\n== TOKENS day ==")
+    pprint.pprint(get_tokens("day"))
+    print("\n== TOKENS week ==")
+    pprint.pprint(get_tokens("week"))
+    print("\n== SERIES (7) ==")
+    for s in get_series(7):
+        print(s["d"], "in=", s["in"], "out=", s["out"], "total=", s["total"])

@@ -14,26 +14,28 @@ INDEX = WEB_DIR / "index.html"
 
 
 class Api:
-    def get_token_today(self) -> dict:
-        return tokens.get_today()
+    def get_rings(self) -> dict:
+        return usage.get_rings()
 
-    def get_token_history(self) -> list:
-        return tokens.get_history(30)
+    def get_tokens(self, period: str = "day") -> dict:
+        return tokens.get_tokens(period)
 
-    def get_usage_latest(self) -> dict:
-        return usage.get_usage_latest()
-
-    def get_usage_history(self) -> dict:
-        return usage.get_usage_history()
+    def get_history_data(self, span: int = 14) -> list:
+        """Per-day token series with the matching peak session % attached."""
+        daily = usage.get_usage_daily()
+        rows = tokens.get_series(int(span))
+        for r in rows:
+            r["limit"] = daily.get(r["d"])
+        return rows
 
     def refresh_usage(self) -> dict:
         """Blocking on-demand /usage scrape. Runs off the GUI thread, so the
-        frontend can await it while showing a spinner."""
+        frontend can await it while showing a spinner. Returns fresh rings."""
         try:
             usage.refresh_usage()
         except Exception as exc:  # surface scrape failures to the UI
-            return {"error": str(exc), **usage.get_usage_latest()}
-        return usage.get_usage_latest()
+            return {"error": str(exc), **usage.get_rings()}
+        return usage.get_rings()
 
 
 def _seal_history() -> None:
@@ -51,9 +53,9 @@ def main() -> None:
         "Claude Usage",
         str(INDEX),
         js_api=Api(),
-        width=440,
-        height=680,
-        min_size=(360, 480),
+        width=452,
+        height=720,
+        min_size=(420, 560),
         on_top=True,
     )
     webview.start()

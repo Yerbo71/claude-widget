@@ -213,26 +213,45 @@ def get_usage_latest() -> dict:
     return {"latest": entries[-1], "series": series, "keys": KEYS}
 
 
-def get_usage_history() -> dict:
-    """Per-day latest snapshot, newest day first."""
-    by_day: dict[str, dict] = {}
+# ---------------------------------------------------------------------------
+# Design-shaped views: ring percentages and per-day peak session %.
+# ---------------------------------------------------------------------------
+
+def _pct(s) -> int | None:
+    if s is None:
+        return None
+    m = re.search(r"(\d+)", str(s))
+    return int(m.group(1)) if m else None
+
+
+def get_rings() -> dict:
+    """Latest limit percentages for the three rings + a freshness label."""
+    data = get_usage_latest()
+    latest = data.get("latest") or {}
+    updated = ((latest.get("Дата") or "") + " · " + (latest.get("Время") or "")).strip(" ·")
+    return {
+        "session": _pct(latest.get("Current session")),
+        "all": _pct(latest.get("Weekly All models")),
+        "sonnet": _pct(latest.get("Weekly Sonnet only")),
+        "design": _pct(latest.get("Weekly Claude Design")),
+        "updated": updated or None,
+    }
+
+
+def get_usage_daily() -> dict:
+    """{ 'DD.MM': peak Current-session % } across the whole log."""
+    peak: dict[str, int] = {}
     for e in read_log():
-        day = e.get("Дата")
-        if not day:
+        full = e.get("Дата")
+        if not full:
             continue
-        prev = by_day.get(day)
-        if prev is None or _time_key(e.get("Время", "")) >= _time_key(prev.get("Время", "")):
-            by_day[day] = e
-
-    def day_key(d: str) -> tuple:
-        try:
-            dd, mm, yy = d.split(".")
-            return (int(yy), int(mm), int(dd))
-        except (ValueError, AttributeError):
-            return (0, 0, 0)
-
-    rows = sorted(by_day.values(), key=lambda e: day_key(e.get("Дата", "")), reverse=True)
-    return {"rows": rows, "keys": KEYS}
+        key = ".".join(full.split(".")[:2])  # DD.MM.YYYY -> DD.MM
+        p = _pct(e.get("Current session"))
+        if p is None:
+            continue
+        if key not in peak or p > peak[key]:
+            peak[key] = p
+    return peak
 
 
 def main() -> None:
