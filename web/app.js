@@ -69,6 +69,25 @@ const compact = (n) => {
 };
 const pctText = (p) => (p == null ? "—" : p + "%");
 
+// Current wall-clock minutes-since-midnight in a named timezone, or null if the
+// zone is unknown/unsupported.
+function nowMinutesInZone(tz) {
+  if (!tz) return null;
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: tz,
+      hour12: false,
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).formatToParts(new Date());
+    const get = (t) => Number(parts.find((p) => p.type === t).value);
+    return (get("hour") % 24) * 60 + get("minute") + get("second") / 60;
+  } catch (e) {
+    return null;
+  }
+}
+
 function sessionResetText() {
   const hm = state.rings && state.rings.sessionReset;
   if (!hm) return "—";
@@ -76,11 +95,17 @@ function sessionResetText() {
   const H = Number(hStr);
   const M = Number(mStr || 0);
   if (Number.isNaN(H)) return "—";
-  const now = new Date();
-  const target = new Date(now);
-  target.setHours(H, M, 0, 0);
-  if (target <= now) target.setDate(target.getDate() + 1);
-  const mins = Math.max(0, Math.round((target - now) / 60000));
+  // The reset is a wall-clock time in the timezone /usage reported (e.g.
+  // Asia/Almaty). Count down against that zone so the machine's own timezone
+  // can't shift the result by an hour.
+  let nowMins = nowMinutesInZone(state.rings && state.rings.resetTz);
+  if (nowMins == null) {
+    const now = new Date();
+    nowMins = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
+  }
+  let diff = H * 60 + M - nowMins;
+  if (diff <= 0) diff += 1440;
+  const mins = Math.max(0, Math.round(diff));
   const hrs = Math.floor(mins / 60);
   const rem = mins % 60;
   return hrs <= 0 ? rem + " мин" : hrs + " ч " + rem + " мин";

@@ -145,14 +145,18 @@ def _parse_percent(text: str, pattern: str) -> str:
     return m.group(1) + "%" if m else "N/A"
 
 
-def _parse_reset(text: str, anchor: str) -> str | None:
-    """Reset clock that follows a section, e.g. '... used Resets 7pm' -> '19:00'.
+def _parse_reset(text: str, anchor: str) -> tuple[str, str | None] | None:
+    """Reset clock that follows a section, e.g. '... used Resets 7pm (Asia/Almaty)'
+    -> ('19:00', 'Asia/Almaty').
 
-    The /usage TUI prints the reset as a local wall-clock time; ANSI stripping can
-    drop letters ('Resets' -> 'Reses'), so the anchor is matched loosely.
+    The /usage TUI prints the reset as a wall-clock time in a named timezone;
+    ANSI stripping can drop letters ('Resets' -> 'Reses') and spaces, so the
+    anchor is matched loosely. The timezone is returned so the frontend can count
+    down against it instead of the machine's own (possibly different) timezone.
     """
     m = re.search(
-        anchor + r"\s*Rese[a-z]*\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)",
+        anchor + r"\s*Rese[a-z]*\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)"
+        r"\s*(?:\(\s*([A-Za-z]+/[A-Za-z_]+)\s*\))?",
         text,
         re.IGNORECASE | re.DOTALL,
     )
@@ -165,21 +169,28 @@ def _parse_reset(text: str, anchor: str) -> str | None:
         hour += 12
     if ampm == "am" and hour == 12:
         hour = 0
-    return f"{hour:02d}:{minute:02d}"
+    return f"{hour:02d}:{minute:02d}", m.group(4)
 
 
 def parse_usage(raw: str) -> dict:
     design = _parse_percent(raw, r"Claude\s*Design[^%]*?(\d+)\s*%\s*used")
     if design == "N/A":
         design = "0%"
-    return {
+    session_reset = _parse_reset(raw, r"Curre[a-z]*\s*session[^%]*?\d+\s*%\s*used")
+    weekly_reset = _parse_reset(raw, r"all\s*models[^%]*?\d+\s*%\s*used")
+    out = {
         "Current session": _parse_percent(raw, r"Curre[a-z]*\s*session[^%]*?(\d+)\s*%\s*used"),
         "Weekly All models": _parse_percent(raw, r"all\s*models[^%]*?(\d+)\s*%\s*used"),
         "Weekly Sonnet only": _parse_percent(raw, r"Sonnet\s*only[^%]*?(\d+)\s*%\s*used"),
         "Weekly Claude Design": design,
-        "Session reset": _parse_reset(raw, r"Curre[a-z]*\s*session[^%]*?\d+\s*%\s*used"),
-        "Weekly reset": _parse_reset(raw, r"all\s*models[^%]*?\d+\s*%\s*used"),
+        "Session reset": session_reset[0] if session_reset else None,
+        "Weekly reset": weekly_reset[0] if weekly_reset else None,
     }
+    if session_reset and session_reset[1]:
+        out["Reset tz"] = session_reset[1]
+    elif weekly_reset and weekly_reset[1]:
+        out["Reset tz"] = weekly_reset[1]
+    return out
 
 
 def scrape_usage(retries: int = 3) -> dict:
@@ -266,6 +277,7 @@ def get_rings() -> dict:
         "design": _pct(latest.get("Weekly Claude Design")),
         "sessionReset": latest.get("Session reset"),
         "weeklyReset": latest.get("Weekly reset"),
+        "resetTz": latest.get("Reset tz"),
         "updated": updated or None,
     }
 
