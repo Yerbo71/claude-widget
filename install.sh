@@ -73,11 +73,16 @@ chmod +x "$DEST/run.sh"
 # ---------------------------------------------------------------------------
 mkdir -p "$DATA_DIR"
 CRON_CMD="*/30 9-18 * * 1-5 DISPLAY=:0 XAUTHORITY=$HOME/.Xauthority $VENV/bin/python $DEST/usage.py >> $USAGE_LOG 2>&1 $CRON_MARKER"
-( crontab -l 2>/dev/null \
-    | grep -v -F "$CRON_MARKER" \
-    | grep -v -F "claude_usage_tracker.py"; \
-  echo "$CRON_CMD" ) | crontab -
-say "Cron installed (weekdays 09:00-18:00, every 30 min)"
+if command -v crontab >/dev/null 2>&1; then
+  existing="$(crontab -l 2>/dev/null || true)"
+  filtered="$(printf '%s\n' "$existing" \
+      | grep -v -F "$CRON_MARKER" \
+      | grep -v -F "claude_usage_tracker.py" || true)"
+  printf '%s\n' "$filtered" "$CRON_CMD" | grep -v '^$' | crontab -
+  say "Cron installed (weekdays 09:00-18:00, every 30 min)"
+else
+  warn "crontab not found; skipping usage cron (the widget still works)."
+fi
 
 # ---------------------------------------------------------------------------
 # 6. Desktop launcher + autostart entry.
