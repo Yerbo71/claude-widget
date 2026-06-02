@@ -37,6 +37,12 @@ class Api:
             return {"error": str(exc), **usage.get_rings()}
         return usage.get_rings()
 
+    def get_settings(self) -> dict:
+        return usage.read_config()
+
+    def set_settings(self, cfg: dict) -> dict:
+        return usage.write_config(cfg)
+
 
 def _seal_history() -> None:
     # Persist completed days to the history store even if the user never opens

@@ -24,8 +24,45 @@ from pathlib import Path
 DATA_DIR = Path.home() / ".claude-widget"
 LOG_FILE = DATA_DIR / "usage_log.json"
 DEBUG_FILE = DATA_DIR / "usage_debug.txt"
+CONFIG_FILE = DATA_DIR / "config.json"
+NOTIFY_STATE_FILE = DATA_DIR / "notify_state.json"
+ICON_FILE = Path(__file__).resolve().with_name("icon.svg")
 
 KEYS = ["Current session", "Weekly All models", "Weekly Sonnet only", "Weekly Claude Design"]
+
+DEFAULT_CONFIG = {"notifyEnabled": True, "notifyThreshold": 90}
+
+
+def read_config() -> dict:
+    """User settings (notification toggle + threshold), merged over defaults."""
+    cfg = dict(DEFAULT_CONFIG)
+    try:
+        stored = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        if isinstance(stored, dict):
+            cfg.update(stored)
+    except (OSError, json.JSONDecodeError):
+        pass
+    cfg["notifyEnabled"] = bool(cfg.get("notifyEnabled", True))
+    try:
+        thr = int(cfg.get("notifyThreshold", 90))
+    except (TypeError, ValueError):
+        thr = 90
+    cfg["notifyThreshold"] = max(1, min(100, thr))
+    return cfg
+
+
+def write_config(cfg: dict) -> dict:
+    """Validate and persist user settings; returns the normalized config."""
+    incoming = cfg if isinstance(cfg, dict) else {}
+    enabled = bool(incoming.get("notifyEnabled", DEFAULT_CONFIG["notifyEnabled"]))
+    try:
+        thr = int(incoming.get("notifyThreshold", DEFAULT_CONFIG["notifyThreshold"]))
+    except (TypeError, ValueError):
+        thr = DEFAULT_CONFIG["notifyThreshold"]
+    normalized = {"notifyEnabled": enabled, "notifyThreshold": max(1, min(100, thr))}
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_FILE.write_text(json.dumps(normalized, ensure_ascii=False, indent=2), encoding="utf-8")
+    return normalized
 
 
 def claude_bin() -> str:
@@ -228,10 +265,76 @@ def _entry_from(values: dict) -> dict:
     return {"Дата": now.strftime("%d.%m.%Y"), "Время": now.strftime("%-H:%M"), **values}
 
 
+def _send_notification(title: str, body: str) -> None:
+    """Fire a desktop notification via notify-send. No-op if it's unavailable.
+
+    Sets DISPLAY/DBUS_SESSION_BUS_ADDRESS so it also works from cron, where the
+    session bus address is otherwise absent and the notification would silently
+    go nowhere.
+    """
+    if not shutil.which("notify-send"):
+        return
+    env = os.environ.copy()
+    env.setdefault("DISPLAY", ":0")
+    env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{os.getuid()}/bus")
+    cmd = ["notify-send", "-a", "Claude Usage", "-u", "critical"]
+    if ICON_FILE.exists():
+        cmd += ["-i", str(ICON_FILE)]
+    cmd += [title, body]
+    try:
+        subprocess.run(cmd, env=env, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def _read_notify_state() -> dict:
+    try:
+        state = json.loads(NOTIFY_STATE_FILE.read_text(encoding="utf-8"))
+        return state if isinstance(state, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _write_notify_state(state: dict) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    NOTIFY_STATE_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def notify_if_needed(entry: dict) -> None:
+    """Notify when the session limit crosses the threshold (rising edge).
+
+    Re-arms once usage drops back below the threshold, so each session cycle can
+    notify once instead of every scrape while above the line.
+    """
+    cfg = read_config()
+    if not cfg.get("notifyEnabled"):
+        return
+    pct = _pct(entry.get("Current session"))
+    if pct is None:
+        return
+    threshold = cfg["notifyThreshold"]
+    state = _read_notify_state()
+    already = bool(state.get("sessionNotified"))
+    if pct >= threshold:
+        if not already:
+            reset = entry.get("Session reset")
+            body = f"Лимит текущей сессии превысил {threshold}%."
+            if reset:
+                body += f" Сброс в {reset}."
+            _send_notification(f"Claude: сессия {pct}%", body)
+            _write_notify_state({**state, "sessionNotified": True})
+    elif already:
+        _write_notify_state({**state, "sessionNotified": False})
+
+
 def refresh_usage() -> dict:
     """On-demand scrape (widget button); appends to the log and returns the entry."""
     entry = _entry_from(scrape_usage(retries=3))
     append_log(entry)
+    try:
+        notify_if_needed(entry)
+    except Exception:  # a notify failure must never break the scrape/log
+        pass
     return entry
 
 

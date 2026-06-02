@@ -177,6 +177,13 @@ const icons = {
       }),
       svgEl("path", { d: "M12 9v4M12 17h.01" }),
     ]),
+  gear: () =>
+    svgIcon({}, [
+      svgEl("circle", { cx: 12, cy: 12, r: 3 }),
+      svgEl("path", {
+        d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z",
+      }),
+    ]),
 };
 
 function mark() {
@@ -246,6 +253,8 @@ const state = {
   tokens: null,
   history: null,
   updatedAt: null,
+  settings: { notifyEnabled: true, notifyThreshold: 90 },
+  settingsOpen: false,
 };
 const els = {};
 
@@ -253,6 +262,74 @@ const els = {};
 
 function themeIcon() {
   return state.theme === "light" ? icons.moon() : icons.sun();
+}
+
+function buildSettingsPanel() {
+  els.notifyToggle = h("input", { type: "checkbox" });
+  els.notifyToggle.checked = !!state.settings.notifyEnabled;
+  els.notifyToggle.addEventListener("change", saveSettings);
+
+  els.thresholdInput = h("input", {
+    type: "number",
+    min: "1",
+    max: "100",
+    step: "1",
+  });
+  els.thresholdInput.value = String(state.settings.notifyThreshold);
+  els.thresholdInput.addEventListener("change", saveSettings);
+
+  return h(
+    "div",
+    { class: "settings", style: "display:none" },
+    h(
+      "label",
+      { class: "set-row" },
+      els.notifyToggle,
+      h("span", null, "Уведомления"),
+    ),
+    h(
+      "label",
+      { class: "set-row" },
+      h("span", null, "Порог, %"),
+      els.thresholdInput,
+    ),
+    h(
+      "div",
+      { class: "set-hint" },
+      "Уведомление при превышении лимита текущей сессии.",
+    ),
+  );
+}
+
+function toggleSettings() {
+  state.settingsOpen = !state.settingsOpen;
+  if (els.settingsPanel)
+    els.settingsPanel.style.display = state.settingsOpen ? "" : "none";
+  els.settingsBtn.classList.toggle("active", state.settingsOpen);
+}
+
+function applySettings(cfg) {
+  if (!cfg) return;
+  state.settings = {
+    notifyEnabled: !!cfg.notifyEnabled,
+    notifyThreshold: Number(cfg.notifyThreshold) || 90,
+  };
+  if (els.notifyToggle) els.notifyToggle.checked = state.settings.notifyEnabled;
+  if (els.thresholdInput)
+    els.thresholdInput.value = String(state.settings.notifyThreshold);
+}
+
+async function saveSettings() {
+  let thr = Math.round(Number(els.thresholdInput.value));
+  if (Number.isNaN(thr)) thr = 90;
+  thr = Math.max(1, Math.min(100, thr));
+  const cfg = { notifyEnabled: els.notifyToggle.checked, notifyThreshold: thr };
+  try {
+    applySettings(await api().set_settings(cfg));
+  } catch (e) {
+    console.error(e);
+    applySettings(cfg);
+  }
 }
 
 function tabButton(name, iconNode, label) {
@@ -270,6 +347,12 @@ function build() {
     icons.refresh(),
   );
   els.refreshBtn.addEventListener("click", onRefreshUsage);
+  els.settingsBtn = h(
+    "button",
+    { class: "iconbtn", title: "Настройки", "aria-label": "Настройки" },
+    icons.gear(),
+  );
+  els.settingsBtn.addEventListener("click", toggleSettings);
   els.themeBtn = h(
     "button",
     { class: "iconbtn", title: "Тема", "aria-label": "Сменить тему" },
@@ -288,8 +371,11 @@ function build() {
       h("span", { class: "t2" }, "Max · текущая сессия"),
     ),
     els.refreshBtn,
+    els.settingsBtn,
     els.themeBtn,
   );
+
+  els.settingsPanel = buildSettingsPanel();
 
   els.tabOverview = tabButton("overview", icons.grid(), "Обзор");
   els.tabHistory = tabButton("history", icons.history(), "История");
@@ -310,7 +396,16 @@ function build() {
 
   mount(
     root,
-    h("div", { class: "widget" }, hdr, tabs, els.overview, els.history, ftr),
+    h(
+      "div",
+      { class: "widget" },
+      hdr,
+      els.settingsPanel,
+      tabs,
+      els.overview,
+      els.history,
+      ftr,
+    ),
   );
 
   tipEl = h("div", { class: "tip" });
@@ -868,12 +963,14 @@ async function boot() {
   setTab("overview");
 
   try {
-    const [rings, toks] = await Promise.all([
+    const [rings, toks, settings] = await Promise.all([
       api().get_rings(),
       api().get_tokens("day"),
+      api().get_settings(),
     ]);
     state.rings = rings;
     state.tokens = toks;
+    applySettings(settings);
   } catch (e) {
     console.error(e);
   }
