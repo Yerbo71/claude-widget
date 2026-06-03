@@ -264,9 +264,10 @@ function themeIcon() {
   return state.theme === "light" ? icons.moon() : icons.sun();
 }
 
-function buildSettingsPanel() {
+function buildSettingsModal() {
   els.notifyToggle = h("input", { type: "checkbox" });
   els.notifyToggle.checked = !!state.settings.notifyEnabled;
+  els.notifyToggle.addEventListener("change", markSettingsDirty);
 
   els.thresholdInput = h("input", {
     type: "number",
@@ -275,15 +276,27 @@ function buildSettingsPanel() {
     step: "1",
   });
   els.thresholdInput.value = String(state.settings.notifyThreshold);
+  els.thresholdInput.addEventListener("input", markSettingsDirty);
 
   els.applyBtn = h("button", { class: "set-apply", type: "button" }, "Применить");
   els.applyBtn.addEventListener("click", saveSettings);
-  els.saveStatus = h("span", { class: "set-status" }, "Сохранено");
 
-  return h(
+  const closeBtn = h(
+    "button",
+    { class: "modal-close", type: "button", "aria-label": "Закрыть" },
+    "×",
+  );
+  closeBtn.addEventListener("click", closeSettings);
+
+  const card = h(
     "div",
-    { class: "settings", style: "display:none" },
-    h("div", { class: "set-head" }, "Уведомления"),
+    { class: "settings modal-card" },
+    h(
+      "div",
+      { class: "modal-head" },
+      h("div", { class: "set-head" }, "Уведомления"),
+      closeBtn,
+    ),
     h(
       "label",
       { class: "set-row" },
@@ -301,15 +314,41 @@ function buildSettingsPanel() {
       { class: "set-hint" },
       "Уведомление при превышении лимита текущей сессии.",
     ),
-    h("div", { class: "set-foot" }, els.saveStatus, els.applyBtn),
+    h("div", { class: "set-foot" }, els.applyBtn),
   );
+  card.addEventListener("click", (e) => e.stopPropagation());
+
+  els.settingsOverlay = h(
+    "div",
+    { class: "modal-overlay", style: "display:none" },
+    card,
+  );
+  els.settingsOverlay.addEventListener("click", closeSettings);
+  return els.settingsOverlay;
+}
+
+function openSettings() {
+  els.notifyToggle.checked = !!state.settings.notifyEnabled;
+  els.thresholdInput.value = String(state.settings.notifyThreshold);
+  els.applyBtn.disabled = false;
+  state.settingsOpen = true;
+  els.settingsOverlay.style.display = "";
+  els.settingsBtn.classList.add("active");
+}
+
+function closeSettings() {
+  state.settingsOpen = false;
+  els.settingsOverlay.style.display = "none";
+  els.settingsBtn.classList.remove("active");
 }
 
 function toggleSettings() {
-  state.settingsOpen = !state.settingsOpen;
-  if (els.settingsPanel)
-    els.settingsPanel.style.display = state.settingsOpen ? "" : "none";
-  els.settingsBtn.classList.toggle("active", state.settingsOpen);
+  if (state.settingsOpen) closeSettings();
+  else openSettings();
+}
+
+function markSettingsDirty() {
+  if (els.applyBtn) els.applyBtn.disabled = false;
 }
 
 function applySettings(cfg) {
@@ -324,6 +363,7 @@ function applySettings(cfg) {
 }
 
 async function saveSettings() {
+  els.applyBtn.disabled = true;
   let thr = Math.round(Number(els.thresholdInput.value));
   if (Number.isNaN(thr)) thr = 90;
   thr = Math.max(1, Math.min(100, thr));
@@ -334,14 +374,7 @@ async function saveSettings() {
     console.error(e);
     applySettings(cfg);
   }
-  flashSaved();
-}
-
-function flashSaved() {
-  if (!els.saveStatus) return;
-  els.saveStatus.classList.add("show");
-  clearTimeout(flashSaved._t);
-  flashSaved._t = setTimeout(() => els.saveStatus.classList.remove("show"), 1800);
+  closeSettings();
 }
 
 function tabButton(name, iconNode, label) {
@@ -387,8 +420,6 @@ function build() {
     els.themeBtn,
   );
 
-  els.settingsPanel = buildSettingsPanel();
-
   els.tabOverview = tabButton("overview", icons.grid(), "Обзор");
   els.tabHistory = tabButton("history", icons.history(), "История");
   const tabs = h("div", { class: "tabs" }, els.tabOverview, els.tabHistory);
@@ -408,17 +439,10 @@ function build() {
 
   mount(
     root,
-    h(
-      "div",
-      { class: "widget" },
-      hdr,
-      els.settingsPanel,
-      tabs,
-      els.overview,
-      els.history,
-      ftr,
-    ),
+    h("div", { class: "widget" }, hdr, tabs, els.overview, els.history, ftr),
   );
+
+  document.body.appendChild(buildSettingsModal());
 
   tipEl = h("div", { class: "tip" });
   document.body.appendChild(tipEl);

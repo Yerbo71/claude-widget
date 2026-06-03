@@ -179,14 +179,65 @@ body {
   }
 }
 
-/* ---------- settings panel ---------- */
+/* ---------- settings modal ---------- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(20, 17, 12, 0.45);
+  backdrop-filter: blur(2px);
+}
 .settings {
-  margin: 0 0 12px;
   padding: 14px;
   background: var(--card);
   border: 1px solid var(--card-edge);
   border-radius: 14px;
   box-shadow: var(--shadow);
+}
+.modal-card {
+  width: 100%;
+  max-width: 320px;
+  animation: modal-in 0.16s ease;
+}
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.modal-head .set-head {
+  margin-bottom: 0;
+}
+.modal-close {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 19px;
+  line-height: 1;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.modal-close:hover {
+  background: var(--tile);
+  color: var(--ink-1);
 }
 .set-head {
   font-size: 11px;
@@ -282,17 +333,7 @@ body {
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
-  margin-top: 12px;
-}
-.set-status {
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--haiku);
-  opacity: 0;
-  transition: opacity 0.2s ease;
-}
-.set-status.show {
-  opacity: 1;
+  margin-top: 14px;
 }
 .set-apply {
   padding: 7px 16px;
@@ -311,6 +352,11 @@ body {
 }
 .set-apply:active {
   filter: brightness(0.95);
+}
+.set-apply:disabled {
+  opacity: 0.5;
+  cursor: default;
+  filter: none;
 }
 
 /* ---------- rings ---------- */
