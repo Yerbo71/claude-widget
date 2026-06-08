@@ -781,12 +781,6 @@ function renderTokens() {
 
 /* ---------- history (simple per-day list) ---------- */
 
-function dayLabel(fromEnd, dmm) {
-  if (fromEnd === 0) return "Сегодня";
-  if (fromEnd === 1) return "Вчера";
-  return dmm;
-}
-
 function histRow(r, label, isToday) {
   const tot = r.in + r.out;
   const p = r.limit;
@@ -857,7 +851,7 @@ function renderHistory() {
     rows
       .map((r, i) => {
         const fromEnd = n - 1 - i;
-        return histRow(r, dayLabel(fromEnd, r.d), fromEnd === 0);
+        return histRow(r, r.d, fromEnd === 0);
       })
       .reverse(),
   );
