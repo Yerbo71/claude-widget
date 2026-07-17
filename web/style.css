@@ -642,6 +642,17 @@ body {
   opacity: 0;
   margin-top: 0;
 }
+/* Wraps token tiles + models so "Свернуть детали" collapses the whole block. */
+.details {
+  overflow: hidden;
+  transition:
+    max-height 0.4s cubic-bezier(0.22, 0.61, 0.36, 1),
+    opacity 0.3s ease;
+}
+.details.collapsed {
+  max-height: 0 !important;
+  opacity: 0;
+}
 .mrow {
   display: grid;
   grid-template-columns: auto 1fr auto;

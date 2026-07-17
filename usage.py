@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
-"""Scrape Claude Code /usage limits via PTY and expose them to the widget.
+"""Read Claude Code usage limits from the account API and expose them to the widget.
 
 Run directly (cron) to append a snapshot during business hours. Import to read
 the log or trigger an on-demand refresh from the widget's "Refresh" button.
+
+Historically this scraped the interactive `/usage` TUI over a PTY. Claude Code
+2.1.x broke that path (the TUI now reports "Failed to load usage data" in a
+headless session), so we instead call the same account endpoint the TUI uses —
+https://api.anthropic.com/api/oauth/usage — with the OAuth token Claude Code
+already stores in ~/.claude/.credentials.json. No quota is spent and there is no
+fragile terminal parsing.
 """
 
-import fcntl
 import json
 import os
-import pty
 import re
-import select
 import shutil
-import struct
 import subprocess
-import termios
 import time
-from datetime import datetime
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 # All widget data is self-contained under ~/.claude-widget; nothing is written
@@ -31,6 +35,15 @@ ICON_FILE = Path(__file__).resolve().with_name("icon.svg")
 KEYS = ["Current session", "Weekly All models", "Weekly Sonnet only", "Weekly Claude Design"]
 
 DEFAULT_CONFIG = {"notifyEnabled": True, "notifyThreshold": 90}
+
+# Claude Code stores its account OAuth token here; the same token authorizes the
+# usage endpoint below. CLAUDE_CREDENTIALS overrides the path if needed.
+CREDENTIALS_FILE = Path(os.environ.get("CLAUDE_CREDENTIALS", Path.home() / ".claude" / ".credentials.json"))
+USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
+OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"  # Claude Code's public OAuth client
+API_BETA = "oauth-2025-04-20"
+HTTP_TIMEOUT = 15
 
 
 def read_config() -> dict:
@@ -65,44 +78,6 @@ def write_config(cfg: dict) -> dict:
     return normalized
 
 
-def claude_bin() -> str:
-    """Resolve the Claude Code CLI the way a terminal would.
-
-    GUI launchers and cron start with a minimal PATH, so instead of guessing
-    install locations we ask the user's login shell to resolve `claude` — it
-    sources their profile (nvm, npm prefixes, ~/.local/bin, …) exactly like an
-    interactive terminal. An explicit CLAUDE_BIN override wins.
-    """
-    override = os.environ.get("CLAUDE_BIN")
-    if override and Path(override).exists():
-        return override
-
-    shell = os.environ.get("SHELL") or "/bin/bash"
-    try:
-        result = subprocess.run(
-            [shell, "-lc", "command -v claude"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        # Profile output can precede the path; take the last line that resolves.
-        for line in reversed(result.stdout.splitlines()):
-            line = line.strip()
-            if line and Path(line).exists():
-                return line
-    except (OSError, subprocess.SubprocessError):
-        pass
-
-    found = shutil.which("claude")
-    if found:
-        return found
-
-    raise FileNotFoundError(
-        "Claude Code CLI ('claude') не найден через login-шелл. Убедитесь, что "
-        "`claude` работает в терминале, либо задайте путь через CLAUDE_BIN."
-    )
-
-
 def is_business_hours() -> bool:
     now = datetime.now()
     if now.weekday() >= 5:
@@ -114,167 +89,194 @@ def is_business_hours() -> bool:
     return True
 
 
-def _set_pty_size(fd: int, rows: int = 24, cols: int = 220) -> None:
-    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+def _local_tz_name() -> str | None:
+    """Best-effort IANA name of the machine's timezone (e.g. 'Asia/Almaty').
 
-
-def _read_for(fd: int, seconds: float) -> bytes:
-    out = b""
-    deadline = time.time() + seconds
-    while time.time() < deadline:
-        r, _, _ = select.select([fd], [], [], 0.2)
-        if r:
-            try:
-                out += os.read(fd, 4096)
-            except OSError:
-                break
-    return out
-
-
-def _strip_ansi(raw: bytes) -> str:
-    clean = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", raw.decode("utf-8", errors="ignore"))
-    clean = re.sub(r"\x1b[>=78]", "", clean)
-    clean = re.sub(r"\x1b\][^\x07]*\x07", "", clean)
-    return clean
-
-
-def _try_capture() -> str:
-    master, slave = pty.openpty()
-    _set_pty_size(master)
-    _set_pty_size(slave)
-
-    env = os.environ.copy()
-    env["TERM"] = "xterm-256color"
-    env["HOME"] = str(Path.home())
-    env.setdefault("DISPLAY", ":0")
-    env.setdefault("XAUTHORITY", str(Path.home() / ".Xauthority"))
-
-    proc = subprocess.Popen(
-        [claude_bin()],
-        stdin=slave,
-        stdout=slave,
-        stderr=slave,
-        close_fds=True,
-        env=env,
-    )
-
-    try:
-        startup_out = b""
-        for _ in range(20):  # up to 10s for the TUI to render and go idle
-            chunk = _read_for(master, 0.5)
-            startup_out += chunk
-            if startup_out and not chunk:
-                break
-
-        if proc.poll() is not None:
-            return f"[PROC EXITED early]\n{_strip_ansi(startup_out)}"
-
-        startup_clean = _strip_ansi(startup_out)
-
-        if "trust" in startup_clean.lower():
-            os.write(master, b"1\r")
-            time.sleep(3)
-            _read_for(master, 3)
-
-        if "Tips" in startup_clean or "What" in startup_clean or "getting started" in startup_clean.lower():
-            os.write(master, b"\x1b")
-            time.sleep(0.5)
-            _read_for(master, 0.5)
-
-        os.write(master, b"/usage\r")
-
-        output = b""
-        deadline = time.time() + 20
-        while time.time() < deadline:
-            output += _read_for(master, 1)
-            if b"used" in output and b"week" in output.lower():
-                time.sleep(1)
-                output += _read_for(master, 2)
-                break
-    finally:
-        try:
-            os.write(master, b"/exit\r")
-            time.sleep(0.5)
-        except OSError:
-            pass
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-        os.close(master)
-        os.close(slave)
-
-    return _strip_ansi(output)
-
-
-def _parse_percent(text: str, pattern: str) -> str:
-    m = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
-    return m.group(1) + "%" if m else "N/A"
-
-
-def _parse_reset(text: str, anchor: str) -> tuple[str, str | None] | None:
-    """Reset clock that follows a section, e.g. '... used Resets 7pm (Asia/Almaty)'
-    -> ('19:00', 'Asia/Almaty').
-
-    The /usage TUI prints the reset as a wall-clock time in a named timezone;
-    ANSI stripping can drop letters ('Resets' -> 'Reses') and spaces, so the
-    anchor is matched loosely. The timezone is returned so the frontend can count
-    down against it instead of the machine's own (possibly different) timezone.
+    The frontend counts a reset down against this zone, so returning a stable
+    IANA name keeps the countdown correct regardless of the browser's own clock.
     """
-    m = re.search(
-        anchor + r"\s*Rese[a-z]*\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)"
-        r"\s*(?:\(\s*([A-Za-z]+/[A-Za-z_]+)\s*\))?",
-        text,
-        re.IGNORECASE | re.DOTALL,
+    try:
+        tz = Path("/etc/timezone")
+        if tz.exists():
+            name = tz.read_text(encoding="utf-8").strip()
+            if name:
+                return name
+    except OSError:
+        pass
+    try:
+        real = os.path.realpath("/etc/localtime")
+        if "/zoneinfo/" in real:
+            return real.split("/zoneinfo/")[-1]
+    except OSError:
+        pass
+    return None
+
+
+def _load_oauth() -> dict:
+    """Return the claudeAiOauth block from Claude Code's credentials file."""
+    data = json.loads(CREDENTIALS_FILE.read_text(encoding="utf-8"))
+    oauth = data.get("claudeAiOauth")
+    if not isinstance(oauth, dict) or not oauth.get("accessToken"):
+        raise RuntimeError("No Claude OAuth token found — sign in with `claude` first.")
+    return oauth
+
+
+def _refresh_token(oauth: dict) -> dict:
+    """Exchange the refresh token for a fresh access token and persist it.
+
+    Written atomically and only after the response is validated, so a failed or
+    malformed refresh never corrupts the credentials Claude Code itself relies on.
+    Returns the updated oauth block. Raises on any failure.
+    """
+    refresh = oauth.get("refreshToken")
+    if not refresh:
+        raise RuntimeError("Access token expired and no refresh token is available.")
+    body = json.dumps(
+        {"grant_type": "refresh_token", "refresh_token": refresh, "client_id": OAUTH_CLIENT_ID}
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        TOKEN_URL, data=body, method="POST", headers={"Content-Type": "application/json"}
     )
-    if not m:
+    with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+        tok = json.loads(resp.read().decode("utf-8"))
+    access = tok.get("access_token")
+    if not access:
+        raise RuntimeError("Token refresh returned no access_token.")
+
+    data = json.loads(CREDENTIALS_FILE.read_text(encoding="utf-8"))
+    block = data.setdefault("claudeAiOauth", {})
+    block["accessToken"] = access
+    if tok.get("refresh_token"):
+        block["refreshToken"] = tok["refresh_token"]
+    if tok.get("expires_in"):
+        block["expiresAt"] = int(time.time() * 1000) + int(tok["expires_in"]) * 1000
+    tmp = CREDENTIALS_FILE.with_suffix(CREDENTIALS_FILE.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, CREDENTIALS_FILE)
+    return block
+
+
+def _api_usage(token: str) -> dict:
+    req = urllib.request.Request(
+        USAGE_URL,
+        headers={"Authorization": f"Bearer {token}", "anthropic-beta": API_BETA},
+    )
+    with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def fetch_usage_raw() -> dict:
+    """Fetch the raw usage JSON from the account API, refreshing the token if needed."""
+    oauth = _load_oauth()
+    expires_at = oauth.get("expiresAt")
+    if isinstance(expires_at, (int, float)) and expires_at <= time.time() * 1000 + 60_000:
+        oauth = _refresh_token(oauth)
+    try:
+        return _api_usage(oauth["accessToken"])
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):  # token rejected — refresh once and retry
+            oauth = _refresh_token(oauth)
+            return _api_usage(oauth["accessToken"])
+        raise
+
+
+def _pct_str(value) -> str:
+    """Round a 0–100 utilization to the widget's 'N%' string, or 'N/A'."""
+    if value is None:
+        return "N/A"
+    try:
+        return f"{int(round(float(value)))}%"
+    except (TypeError, ValueError):
+        return "N/A"
+
+
+def _limit_percent(data: dict, kind: str):
+    for lim in data.get("limits") or []:
+        if lim.get("kind") == kind and lim.get("percent") is not None:
+            return lim["percent"]
+    return None
+
+
+def _reset_local(iso: str | None) -> str | None:
+    """Convert an API 'resets_at' ISO timestamp to a local wall-clock 'HH:MM'."""
+    if not iso:
         return None
-    hour = int(m.group(1))
-    minute = int(m.group(2) or 0)
-    ampm = m.group(3).lower()
-    if ampm == "pm" and hour != 12:
-        hour += 12
-    if ampm == "am" and hour == 12:
-        hour = 0
-    return f"{hour:02d}:{minute:02d}", m.group(4)
+    try:
+        dt = datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone().strftime("%H:%M")
+    except (ValueError, TypeError):
+        return None
 
 
-def parse_usage(raw: str) -> dict:
-    design = _parse_percent(raw, r"Claude\s*Design[^%]*?(\d+)\s*%\s*used")
+def parse_usage(data: dict) -> dict:
+    """Map the account usage JSON onto the widget's log schema."""
+    five_hour = data.get("five_hour") or {}
+    seven_day = data.get("seven_day") or {}
+    seven_day_sonnet = data.get("seven_day_sonnet") or {}
+
+    session_pct = _limit_percent(data, "session")
+    if session_pct is None:
+        session_pct = five_hour.get("utilization")
+    all_pct = _limit_percent(data, "weekly_all")
+    if all_pct is None:
+        all_pct = seven_day.get("utilization")
+    # "Sonnet only" historically tracked the model-scoped weekly limit; the API
+    # now exposes it as a scoped weekly limit (whichever premium model applies).
+    scoped_pct = seven_day_sonnet.get("utilization")
+    if scoped_pct is None:
+        scoped_pct = _limit_percent(data, "weekly_scoped")
+
+    design = _pct_str((data.get("seven_day_cowork") or {}).get("utilization"))
     if design == "N/A":
         design = "0%"
-    session_reset = _parse_reset(raw, r"Curre[a-z]*\s*session[^%]*?\d+\s*%\s*used")
-    weekly_reset = _parse_reset(raw, r"all\s*models[^%]*?\d+\s*%\s*used")
+
     out = {
-        "Current session": _parse_percent(raw, r"Curre[a-z]*\s*session[^%]*?(\d+)\s*%\s*used"),
-        "Weekly All models": _parse_percent(raw, r"all\s*models[^%]*?(\d+)\s*%\s*used"),
-        "Weekly Sonnet only": _parse_percent(raw, r"Sonnet\s*only[^%]*?(\d+)\s*%\s*used"),
+        "Current session": _pct_str(session_pct),
+        "Weekly All models": _pct_str(all_pct),
+        "Weekly Sonnet only": _pct_str(scoped_pct),
         "Weekly Claude Design": design,
-        "Session reset": session_reset[0] if session_reset else None,
-        "Weekly reset": weekly_reset[0] if weekly_reset else None,
+        "Session reset": _reset_local(five_hour.get("resets_at")),
+        "Weekly reset": _reset_local(seven_day.get("resets_at")),
     }
-    if session_reset and session_reset[1]:
-        out["Reset tz"] = session_reset[1]
-    elif weekly_reset and weekly_reset[1]:
-        out["Reset tz"] = weekly_reset[1]
+    tz = _local_tz_name()
+    if tz:
+        out["Reset tz"] = tz
     return out
 
 
 def scrape_usage(retries: int = 3) -> dict:
-    """Spawn Claude, read /usage, return parsed percentages. Costs session quota."""
-    raw = ""
-    for attempt in range(retries):
-        raw = _try_capture()
+    """Read usage limits from the account API. Retries transient failures.
+
+    Kept the historical name (the widget/on-demand refresh call it) even though
+    it no longer scrapes a terminal. Returns the parsed schema, or all-N/A values
+    if every attempt fails, so the widget degrades gracefully instead of crashing.
+    """
+    last_err = None
+    for attempt in range(max(1, retries)):
         try:
-            DATA_DIR.mkdir(parents=True, exist_ok=True)
-            DEBUG_FILE.write_text(raw, encoding="utf-8")
-        except OSError:
-            pass
-        if "used" in raw and "week" in raw.lower():
-            break
-        time.sleep(5)
-    return parse_usage(raw)
+            data = fetch_usage_raw()
+            try:
+                DATA_DIR.mkdir(parents=True, exist_ok=True)
+                DEBUG_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            except OSError:
+                pass
+            return parse_usage(data)
+        except Exception as exc:  # network/auth hiccup — retry, then give up cleanly
+            last_err = exc
+            if attempt < retries - 1:
+                time.sleep(3)
+    print(f"  usage fetch failed: {last_err}")
+    return {
+        "Current session": "N/A",
+        "Weekly All models": "N/A",
+        "Weekly Sonnet only": "N/A",
+        "Weekly Claude Design": "0%",
+        "Session reset": None,
+        "Weekly reset": None,
+    }
 
 
 def read_log() -> list:
@@ -436,7 +438,7 @@ def main() -> None:
     if not is_business_hours():
         print(f"[{datetime.now():%d.%m.%Y %H:%M}] Outside business hours, skipping.")
         return
-    print(f"[{datetime.now():%d.%m.%Y %H:%M}] Capturing /usage...")
+    print(f"[{datetime.now():%d.%m.%Y %H:%M}] Fetching usage...")
     entry = refresh_usage()
     print(f"Saved: {entry}")
 

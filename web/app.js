@@ -437,10 +437,8 @@ function build() {
     h("span", { class: "plan" }, "Max"),
   );
 
-  mount(
-    root,
-    h("div", { class: "widget" }, hdr, tabs, els.overview, els.history, ftr),
-  );
+  els.widget = h("div", { class: "widget" }, hdr, tabs, els.overview, els.history, ftr);
+  mount(root, els.widget);
 
   document.body.appendChild(buildSettingsModal());
 
@@ -679,7 +677,7 @@ function modelRow(m, maxM) {
 function renderExpandLabel() {
   mount(
     els.expand,
-    state.open ? "Свернуть детали" : "Показать модели",
+    state.open ? "Свернуть детали" : "Показать детали",
     icons.chev(),
   );
 }
@@ -688,13 +686,15 @@ function toggleModels() {
   state.open = !state.open;
   els.expand.classList.toggle("open", state.open);
   renderExpandLabel();
+  // Collapses the whole token details block (tiles + per-model breakdown), not
+  // just the models list, so "Свернуть детали" hides the token numbers too.
   if (state.open) {
-    els.models.classList.remove("collapsed");
-    els.models.style.maxHeight = els.models.scrollHeight + "px";
+    els.details.classList.remove("collapsed");
+    els.details.style.maxHeight = els.details.scrollHeight + "px";
   } else {
-    els.models.style.maxHeight = els.models.scrollHeight + "px";
-    void els.models.offsetHeight;
-    els.models.classList.add("collapsed");
+    els.details.style.maxHeight = els.details.scrollHeight + "px";
+    void els.details.offsetHeight;
+    els.details.classList.add("collapsed");
   }
 }
 
@@ -771,12 +771,21 @@ function renderTokens() {
     mount(els.models, head, ...models.map((m) => modelRow(m, maxM)));
   }
 
+  // Tiles + models share one collapsible container so the toggle hides the
+  // whole token block; the "Токены" header stays as an anchor.
+  els.details = h(
+    "div",
+    { class: "details" + (state.open ? "" : " collapsed") },
+    tiles,
+    els.models,
+  );
+
   els.expand = h("button", { class: "expand" + (state.open ? " open" : "") });
   els.expand.addEventListener("click", toggleModels);
   renderExpandLabel();
 
-  mount(els.tokensWrap, secHead, tiles, els.models, els.expand);
-  if (state.open) els.models.style.maxHeight = els.models.scrollHeight + "px";
+  mount(els.tokensWrap, secHead, els.details, els.expand);
+  if (state.open) els.details.style.maxHeight = els.details.scrollHeight + "px";
 }
 
 /* ---------- history (simple per-day list) ---------- */
@@ -979,6 +988,44 @@ function updateAgo() {
   if (els.resetText) els.resetText.nodeValue = sessionResetText();
 }
 
+/* ---------- native-widget autosize ---------- */
+
+// Body padding around the card (18px top + 18px bottom) that the window must
+// include so the card's shadow isn't clipped. Keep in sync with `body` padding.
+const FRAME_PAD = 36;
+let _lastH = 0;
+let _rafPending = false;
+
+function syncHeight() {
+  const bridge = window.pywebview && window.pywebview.api;
+  if (!bridge || !bridge.autosize || !els.widget) return;
+  const h = Math.ceil(els.widget.getBoundingClientRect().height) + FRAME_PAD;
+  if (Math.abs(h - _lastH) < 2) return; // ignore sub-pixel churn
+  _lastH = h;
+  bridge.autosize(h);
+}
+
+function scheduleSync() {
+  if (_rafPending) return;
+  _rafPending = true;
+  requestAnimationFrame(() => {
+    _rafPending = false;
+    syncHeight();
+  });
+}
+
+// Follow the card's height through tab switches, collapse animations, and data
+// loads. ResizeObserver fires each frame during CSS transitions, so the window
+// tracks the animation; the rAF throttle keeps it to one resize per frame.
+function observeHeight() {
+  if (typeof ResizeObserver === "undefined" || !els.widget) {
+    scheduleSync();
+    return;
+  }
+  new ResizeObserver(scheduleSync).observe(els.widget);
+  scheduleSync();
+}
+
 /* ---------- boot ---------- */
 
 async function boot() {
@@ -1008,6 +1055,8 @@ async function boot() {
   renderTokens();
   state.updatedAt = new Date();
   updateAgo();
+
+  observeHeight();
 
   setInterval(refreshTokens, 30000);
   setInterval(reloadRings, 30000);

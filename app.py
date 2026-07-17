@@ -12,8 +12,32 @@ import usage
 WEB_DIR = Path(__file__).resolve().parent / "web"
 INDEX = WEB_DIR / "index.html"
 
+WIDTH = 452  # 420px card + 16px body padding on each side
+INIT_HEIGHT = 640  # a sensible first paint; the frontend corrects it on boot
+MIN_HEIGHT = 200
+MAX_HEIGHT = 1600
+
 
 class Api:
+    def __init__(self) -> None:
+        self.window = None  # set after the window is created
+
+    def autosize(self, height) -> None:
+        """Resize the window to hug the card, so it behaves like a native widget
+        instead of a fixed frame. Called by the frontend whenever content height
+        changes (tab switch, collapse, data load). Width stays fixed."""
+        win = self.window
+        if win is None:
+            return
+        try:
+            h = max(MIN_HEIGHT, min(MAX_HEIGHT, int(round(float(height)))))
+        except (TypeError, ValueError):
+            return
+        try:
+            win.resize(WIDTH, h)
+        except Exception:
+            pass
+
     def get_rings(self) -> dict:
         return usage.get_rings()
 
@@ -55,13 +79,14 @@ def _seal_history() -> None:
 
 def main() -> None:
     threading.Thread(target=_seal_history, daemon=True).start()
-    webview.create_window(
+    api = Api()
+    api.window = webview.create_window(
         "Claude Usage",
         str(INDEX),
-        js_api=Api(),
-        width=452,
-        height=720,
-        min_size=(420, 560),
+        js_api=api,
+        width=WIDTH,
+        height=INIT_HEIGHT,
+        min_size=(WIDTH, MIN_HEIGHT),
         on_top=True,
     )
     webview.start()
